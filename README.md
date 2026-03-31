@@ -52,8 +52,6 @@ The app generates professional analysis notes such as:
 
 Baptiste Dechamp — Finance student, aspiring asset management analyst
 ```
-
-Sauvegarde avec **Ctrl+S**, puis dans PowerShell :
 ```
 git add README.md
 git commit -m "Add README"
