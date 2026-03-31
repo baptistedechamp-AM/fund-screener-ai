@@ -1,10 +1,11 @@
 """
-llm.py — Generate AI-powered fund summaries using Ollama (local).
+llm.py — Generate AI-powered fund analysis using Groq (Llama 3.1 70B).
 """
-
-import requests
-
-
+ 
+import os
+from groq import Groq
+ 
+ 
 def _build_prompt(fund_data: dict) -> str:
     ticker = fund_data.get("ticker", "N/A")
     name = fund_data.get("name", "N/A")
@@ -18,11 +19,36 @@ def _build_prompt(fund_data: dict) -> str:
     beta = fund_data.get("beta")
     dividend_yield = fund_data.get("dividend_yield")
     description = fund_data.get("description", "")
-
-    return f"""You are a professional asset management analyst. Based on the data below, write a concise and insightful fund analysis note in 4-6 sentences.
-Cover: the fund's investment objective, its risk/return profile, notable strengths or weaknesses, and a brief suitability comment.
-Be factual, precise, and avoid marketing language.
-
+ 
+    return f"""You are a senior fund analyst at a top asset management firm.
+Write a professional investment analysis note for the fund below.
+ 
+Structure your analysis in exactly 4 paragraphs:
+ 
+1. FUND OVERVIEW: State the fund's objective, category, and size (AUM). 
+   Mention the expense ratio and whether it is competitive for its category.
+ 
+2. PERFORMANCE & RISK: Analyze the total return vs the level of risk taken.
+   - If Sharpe > 1.0: strong risk-adjusted performance
+   - If Sharpe 0.5-1.0: adequate compensation for risk
+   - If Sharpe < 0.5: risk may not be adequately compensated
+   Compare volatility and max drawdown to assess downside risk.
+   Comment on the beta to indicate market sensitivity.
+ 
+3. INCOME & SUITABILITY: Discuss the dividend yield if relevant.
+   Specify which investor profile this fund suits:
+   - Conservative (low vol, income-focused)
+   - Balanced (moderate risk/return)
+   - Growth-oriented (higher vol, capital appreciation)
+   - Tactical/Satellite (thematic or concentrated exposure)
+ 
+4. KEY CONSIDERATIONS: Mention 1-2 specific risks or watchpoints 
+   (concentration risk, interest rate sensitivity, sector exposure, etc.)
+   and one potential catalyst or strength going forward.
+ 
+Be precise, use the actual numbers provided, and avoid generic marketing language.
+Write in a professional but accessible tone. Keep each paragraph to 2-3 sentences.
+ 
 --- FUND DATA ---
 Ticker: {ticker}
 Name: {name}
@@ -37,21 +63,32 @@ Beta: {beta}
 Dividend Yield: {dividend_yield}
 Description: {description[:500] if description else 'N/A'}
 --- END ---
-
+ 
 Write the analysis note now:"""
-
-
-def generate_summary(fund_data: dict, provider: str = "Ollama") -> str:
+ 
+ 
+def generate_summary(fund_data: dict, provider: str = "Groq") -> str:
+    """Generate a fund analysis using Groq API (Llama 3.1 70B)."""
     try:
-        response = requests.post(
-            "http://localhost:11434/api/generate",
-            json={
-                "model": "gemma3:4b",
-                "prompt": _build_prompt(fund_data),
-                "stream": False
-            },
-            timeout=60
+        client = Groq(api_key=os.getenv("GROQ_API_KEY"))
+ 
+        response = client.chat.completions.create(
+            model="llama-3.3-70b-versatile",
+            messages=[
+                {
+                    "role": "system",
+                    "content": "You are a senior fund analyst. Write precise, data-driven analysis notes."
+                },
+                {
+                    "role": "user",
+                    "content": _build_prompt(fund_data)
+                }
+            ],
+            temperature=0.3,
+            max_tokens=800,
         )
-        return response.json()["response"]
+ 
+        return response.choices[0].message.content
+ 
     except Exception as e:
-        return f"❌ Ollama error: {str(e)}"
+        return f"❌ Groq API error: {str(e)}"

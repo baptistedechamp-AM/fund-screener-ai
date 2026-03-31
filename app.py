@@ -85,7 +85,7 @@ with st.sidebar:
 
     st.divider()
     st.subheader("🤖 AI Settings")
-    llm_provider = st.selectbox("LLM provider", ["Claude", "OpenAI GPT-4"])
+    llm_provider = st.selectbox("LLM provider", ["Groq (Llama 3.1 70B)"])
     auto_generate = st.toggle("Auto-generate AI summaries", value=False)
 
     st.divider()
