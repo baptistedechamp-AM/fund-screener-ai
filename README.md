@@ -51,8 +51,3 @@ The app generates professional analysis notes such as:
 ## 👤 Author
 
 Baptiste Dechamp — Finance student, aspiring asset management analyst
-```
-```
-git add README.md
-git commit -m "Add README"
-git push
