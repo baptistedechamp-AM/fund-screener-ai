@@ -14,12 +14,13 @@ from utils.data import (
     fetch_price_history,
     build_fund_summary_dict,
     detect_significant_moves,
+    build_news_search_url,
     format_aum,
     format_pct,
     PERIOD_MAP,
     PRESET_FUNDS,
 )
-from utils.llm import generate_summary, explain_market_events
+from utils.llm import generate_summary
 
 load_dotenv()
 
@@ -70,6 +71,20 @@ def metric_card(label, value, color=None, sub=None):
     return html
 
 
+def currency_symbol(currency_code: str) -> str:
+    """Return the display symbol for a currency code from Yahoo Finance."""
+    if not currency_code:
+        return "$"
+    code = currency_code.upper()
+    if code in ("GBP", "GBX", "GBP"):
+        return "£"
+    if code == "EUR":
+        return "€"
+    if code == "CHF":
+        return "CHF "
+    return "$"
+
+
 # ─── Custom CSS ──────────────────────────────────────────────────────────────
 
 st.markdown("""
@@ -118,6 +133,14 @@ st.markdown("""
         color: #E0E0E0;
         line-height: 1.6;
         font-size: 0.88rem;
+    }
+    .event-box a {
+        color: #4DA6FF;
+        text-decoration: none;
+    }
+    .event-box a:hover {
+        text-decoration: underline;
+        color: #79BFFF;
     }
     .tag {
         display: inline-block;
@@ -210,7 +233,7 @@ def load_price_history(ticker, period):
 
 @st.cache_data(ttl=300)
 def load_events(ticker, period):
-    return detect_significant_moves(ticker, period, threshold=2.0)
+    return detect_significant_moves(ticker, period, threshold=1.5, min_abs_return=0.8)
 
 with st.spinner("Fetching market data..."):
     all_data = {t: load_fund_data(t, period) for t in tickers}
@@ -242,7 +265,7 @@ for i, (ticker, d) in enumerate(valid_funds.items()):
         ret_color = color_value(ret)
         price_display = d.get("current_price", "N/A")
         currency = d.get("currency", "USD")
-        symbol = "£" if currency == "GBp" else "€" if currency == "EUR" else "$"
+        symbol = currency_symbol(currency)
         ret_str = f"{'+' if ret and ret > 0 else ''}{ret}%" if ret else "N/A"
         st.markdown(f"""
         <div class="metric-card">
@@ -282,7 +305,7 @@ for ticker_name in list(valid_funds.keys()):
     if evts and not hist.empty:
         col = hist.columns[0]
         norm = hist[col] / hist[col].iloc[0] * 100
-        for evt in evts[:2]:
+        for evt in evts[:3]:
             if evt["date"] in norm.index:
                 all_events.append({
                     "ticker": ticker_name,
@@ -295,10 +318,10 @@ for ticker_name in list(valid_funds.keys()):
 all_events.sort(key=lambda x: abs(x["return_pct"]), reverse=True)
 shown_events = []
 for evt in all_events:
-    too_close = any(abs((evt["date"] - s["date"]).days) < 10 for s in shown_events)
+    too_close = any(abs((evt["date"] - s["date"]).days) < 5 for s in shown_events)
     if not too_close:
         shown_events.append(evt)
-    if len(shown_events) >= 4:
+    if len(shown_events) >= 6:
         break
 
 for evt in shown_events:
@@ -333,25 +356,28 @@ fig.update_layout(
 )
 st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
 
-# ─── Market Events Explanation ────────────────────────────────────────────────
+# ─── Market Events — News Links ──────────────────────────────────────────────
 
 if shown_events:
-    st.markdown('<p class="section-header">Market Events — AI Analysis</p>', unsafe_allow_html=True)
-    events_key = f"events_{'_'.join([e['ticker'] + e['date'].strftime('%Y%m%d') for e in shown_events])}"
+    st.markdown('<p class="section-header">Market Events — News</p>', unsafe_allow_html=True)
 
-    if events_key not in st.session_state:
-        if auto_generate:
-            with st.spinner("Analyzing market events..."):
-                st.session_state[events_key] = explain_market_events(shown_events)
-        else:
-            if st.button("Explain these market moves with AI", key="btn_events"):
-                with st.spinner("Analyzing market events..."):
-                    st.session_state[events_key] = explain_market_events(shown_events)
+    for evt in shown_events:
+        date_str = evt["date"].strftime("%B %d, %Y")
+        sign = "+" if evt["return_pct"] > 0 else ""
+        evt_color = COLORS["green"] if evt["return_pct"] > 0 else COLORS["red"]
 
-    if events_key in st.session_state:
-        st.markdown(f'<div class="event-box">{st.session_state[events_key]}</div>', unsafe_allow_html=True)
-    elif not auto_generate:
-        st.caption("Click to get AI-powered explanations for the annotated market moves above.")
+        # Build Google News search link for this event
+        news_url = build_news_search_url(evt["ticker"], evt["date"], evt["return_pct"])
+
+        html = f'<div class="event-box">'
+        html += f'<strong style="color: {evt_color}">{evt["ticker"]} {sign}{evt["return_pct"]}%</strong>'
+        html += f' <span style="color: #6B7280">— {date_str}</span>'
+        html += f'<div style="margin-top: 8px;">'
+        html += f'🔍 <a href="{news_url}" target="_blank">Search news for this date →</a>'
+        html += f'</div>'
+        html += '</div>'
+
+        st.markdown(html, unsafe_allow_html=True)
 
 # ─── Comparison Table ─────────────────────────────────────────────────────────
 
@@ -372,7 +398,7 @@ for ticker, d in valid_funds.items():
         "Sharpe": d.get("sharpe_ratio", "N/A"),
         "Sortino": d.get("sortino_ratio", "N/A"),
         "Max DD": f"{d.get('max_drawdown', 'N/A')}%",
-        "Beta": d.get("beta", "N/A"),
+        "Beta": f"{d['beta']} vs {d.get('benchmark_used', '?')}" if d.get("beta") else "—",
     })
 
 df = pd.DataFrame(rows)
@@ -433,7 +459,7 @@ for tab, (ticker, d) in zip(tabs, valid_funds.items()):
         st.markdown("")
 
         currency = d.get("currency", "USD")
-        symbol = "£" if currency == "GBp" else "€" if currency == "EUR" else "$"
+        symbol = currency_symbol(currency)
         er = d.get("expense_ratio")
         dy = d.get("dividend_yield")
         aum = d.get("aum")
@@ -472,19 +498,41 @@ for tab, (ticker, d) in zip(tabs, valid_funds.items()):
 
         st.markdown("")
 
-        r3 = st.columns(3)
-        with r3[0]:
-            beta = d.get("beta")
-            beta_color = COLORS["green"] if beta and 0.8 <= float(beta) <= 1.2 else COLORS["yellow"] if beta else COLORS["gray"]
-            st.markdown(metric_card("Beta (3Y)", beta if beta else "—", beta_color), unsafe_allow_html=True)
-        with r3[1]:
-            te = d.get("tracking_error")
-            bench = d.get("benchmark_used", "")
-            bench_label = f"vs {bench}" if bench and bench.upper() != ticker.upper() else ""
-            te_display = f"{te}%" if te else "—"
-            st.markdown(metric_card(f"Tracking Error {bench_label}", te_display, COLORS["blue"] if te else COLORS["gray"]), unsafe_allow_html=True)
-        with r3[2]:
-            dp = d.get("data_points")
+        r3_cols = []
+        beta = d.get("beta")
+        te = d.get("tracking_error")
+        bench = d.get("benchmark_used")
+        dp = d.get("data_points")
+
+        # Determine how many metric cards to show
+        show_beta = beta is not None
+        show_te = te is not None
+        cards = []
+        if show_beta:
+            cards.append("beta")
+        if show_te:
+            cards.append("te")
+        cards.append("dp")
+
+        r3 = st.columns(len(cards))
+        col_idx = 0
+
+        if show_beta:
+            with r3[col_idx]:
+                beta_color = COLORS["green"] if 0.8 <= float(beta) <= 1.2 else COLORS["yellow"]
+                bench_name = bench if bench else "?"
+                beta_label = f"Beta vs {bench_name}"
+                st.markdown(metric_card(beta_label, beta, beta_color), unsafe_allow_html=True)
+            col_idx += 1
+
+        if show_te:
+            with r3[col_idx]:
+                bench_label = f"vs {bench}" if bench and bench.upper() != ticker.upper() else ""
+                te_display = f"{te}%"
+                st.markdown(metric_card(f"Tracking Error {bench_label}", te_display, COLORS["blue"]), unsafe_allow_html=True)
+            col_idx += 1
+
+        with r3[col_idx]:
             st.markdown(metric_card("Data Points", dp if dp else "N/A", COLORS["gray"]), unsafe_allow_html=True)
 
         st.markdown("")

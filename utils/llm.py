@@ -1,5 +1,6 @@
 """
-llm.py — Generate AI-powered fund analysis and market event explanations using Groq.
+llm.py — Generate AI-powered fund analysis using Groq.
+Market event explanations have been replaced by real news articles from FMP.
 """
 
 import os
@@ -67,31 +68,6 @@ Description: {description[:500] if description else 'N/A'}
 Write the analysis note now:"""
 
 
-def _build_events_prompt(events: list) -> str:
-    events_text = ""
-    for evt in events:
-        date_str = evt["date"].strftime("%B %d, %Y")
-        sign = "+" if evt["return_pct"] > 0 else ""
-        events_text += f"- {evt['ticker']}: {sign}{evt['return_pct']}% on {date_str}\n"
-
-    return f"""You are a financial market analyst. Below are significant market moves detected on specific dates.
-
-For each event, provide a brief 1-sentence explanation of what likely caused the move, 
-based on your knowledge of major market events (tariffs, Fed decisions, earnings, geopolitical events, etc.).
-
-Format your response as a simple list:
-- [Date]: [Ticker] [move]: [1-sentence explanation]
-
-Be specific (mention actual events like "Trump tariff announcement", "Fed rate decision", etc.).
-If you are not sure about the exact cause, give the most likely explanation based on the date and market context.
-
---- SIGNIFICANT MOVES ---
-{events_text}
---- END ---
-
-Explain each move now:"""
-
-
 def generate_summary(fund_data: dict, provider: str = "Groq") -> str:
     """Generate a fund analysis using Groq API."""
     try:
@@ -108,23 +84,3 @@ def generate_summary(fund_data: dict, provider: str = "Groq") -> str:
         return response.choices[0].message.content
     except Exception as e:
         return f"❌ Groq API error: {str(e)}"
-
-
-def explain_market_events(events: list) -> str:
-    """Use Groq to explain what caused significant market moves."""
-    if not events:
-        return ""
-    try:
-        client = Groq(api_key=os.getenv("GROQ_API_KEY"))
-        response = client.chat.completions.create(
-            model="llama-3.3-70b-versatile",
-            messages=[
-                {"role": "system", "content": "You are a financial market analyst. Be concise and factual."},
-                {"role": "user", "content": _build_events_prompt(events)}
-            ],
-            temperature=0.2,
-            max_tokens=500,
-        )
-        return response.choices[0].message.content
-    except Exception as e:
-        return f"❌ Could not generate event explanations: {str(e)}"
